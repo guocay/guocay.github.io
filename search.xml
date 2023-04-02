@@ -1,49 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <search>
   <entry>
-    <title>关于金仓数据库不被主流框架(如Activiti,Flowable)支持的思考与解决方案</title>
-    <url>/202110/20007eeb8144.html</url>
-    <content><![CDATA[<h2 id="问题描述"><a href="#问题描述" class="headerlink" title="问题描述"></a>问题描述</h2><blockquote>
-<p>去年底的时候,我们的项目中需要使用工作流实现业务.经过一些讨论,最终决定使用开源引擎Activiti进行集成.在现阶段大环境下,项目要求需要使用自主可控的国产数据库–KingBase.</p>
-</blockquote>
-<blockquote>
-<p>用过Activiti,Flowable的同学应该都知道,这类工具是强依赖数据库的.特别是在项目启动的过程中就会创建一批数据表用于存储BMPN模型,工作流实例和历史数据等.这就导致在项目代码启动连接数据库的时候,就会报错显示 “不支持KingBaseES的数据库”.</p>
-</blockquote>
-<h2 id="问题思考"><a href="#问题思考" class="headerlink" title="问题思考"></a>问题思考</h2><ol>
-<li>通过查看Flowable的文档和源码,我们了解到这类工具在启动时会利用工具 LiquiBase 对数据库的数据表进行初始化(LiquiBase是一个方言无关的数据库版本管理工具).而LiquiBase在运行时会获取数据库产品类型后动态根据资源中的数据表定义生成符合当前数据库方言的建表语句.后运行初始化表;</li>
-<li>从网上公开的知识可以了解到,金仓的数据库KingBase是根据开源数据库PostgreSQL魔改而来,然后通过汇总得知,在KingBase对于pgSQL的差异中包括(但不限于) 命令名,系统表和视图,函数的语法等等.从后端程序员的使用角度出发,能与我们产生兼容性联系的基本都在系统表和视图这部分的差异弥补;</li>
-<li>通过对JDBC标准的了解.我们得知每一个实现了JDBC标准的Driver都需要返回客户端一个字符串以表明自己的数据库名称(类型).所以,如果我们在KingBase的数据库驱动中将产品类型从”KingBaseES”换为”postgresql”.理论上就能骗过工具;</li>
-</ol>
-<h2 id="编码逻辑"><a href="#编码逻辑" class="headerlink" title="编码逻辑"></a>编码逻辑</h2><ol>
-<li>通过对现状的评估,得益于KingBase的魔改对于pgSQL的实现并不是破坏性的.我们觉得最小成本的修改应该是这样的,在关键节点中欺骗Activiti.让其始终认为自己连接的是pgSQL.而不是KingBase;</li>
-<li>KingBase数据库对于pgSQL还修改了所有的系统表和视图,但也仅是修改了前缀(比如pg_tables修改成sys_tables).而在一些开源框架中也会调用这些系统表来实现逻辑.基于此,我们觉得可以手动创建一批视图pg_tables去映射sys_tables;</li>
-</ol>
-<h2 id="实现方案"><a href="#实现方案" class="headerlink" title="实现方案"></a>实现方案</h2><ol>
-<li>反编译kingbase数据库连接驱动kingbase8-8.x.x.jar;找到实现了java.sql.DatabaseMetaData接口的类;</li>
-</ol>
-<figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="comment">// KingBase中实现了DatabaseMetaData的类在com.kingbase8.jdbc.KbDatabaseMetaData类中</span></span><br><span class="line"><span class="comment">// 找到如下的函数 将返回的 &quot;KingbaseES&quot; 修改为 &quot;postgresql&quot;</span></span><br><span class="line"> <span class="keyword">public</span> String <span class="title function_">getDatabaseProductName</span><span class="params">()</span> <span class="keyword">throws</span> SQLException &#123;</span><br><span class="line">     <span class="comment">// return &quot;KingbaseES&quot;;</span></span><br><span class="line">     <span class="keyword">return</span> <span class="string">&quot;postgresql&quot;</span>;</span><br><span class="line">  &#125;</span><br></pre></td></tr></table></figure>
-
-<ol start="2">
-<li>将修改过的KbDatabaseMetaData.class编译后重新打包入驱动中;</li>
-<li>手动到数据库创建视图 pg_tables(如有需要也可创建别的,这里仅作演示目的.);</li>
-</ol>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">create</span> <span class="keyword">view</span> pg_tables <span class="keyword">as</span> <span class="keyword">select</span> <span class="operator">*</span> <span class="keyword">from</span> sys_tables;</span><br></pre></td></tr></table></figure>
-
-<h2 id="其他方案"><a href="#其他方案" class="headerlink" title="其他方案"></a>其他方案</h2><ol>
-<li>依赖于java中的类加载器AppClassLoader中关于加载资源时定义的是个数组,且指向src目录的资源永远在下标零处.所以,只要在src中定义的类永远优先于其他地方的类加载;</li>
-<li>打开你需要集成的工具框架,找到用于解析数据库类型进行后续操作的类.在src下创建同名同路径的java文件;</li>
-<li>复制反编译后类中所有的代码至src目录下的文件后,增加对应的配置以在解析到”KingbaseES”进行自定义操作;</li>
-</ol>
-<h2 id="PS"><a href="#PS" class="headerlink" title="PS"></a>PS</h2><ol>
-<li>LiquiBase是一个方言无关的数据库版本管理工具,真心好用!!!会根据定义好的xml内容对数据库的初始化,数据表版本进行管理,Mekatok即是使用LiquiBase对数据库进行管理.再不需要在项目初次启动时先运行数据库建表脚本,也不需要再针对数据库加字段什么的汇总脚本各个环境先同步数据库.</li>
-</ol>
-]]></content>
-      <tags>
-        <tag>Mekatok</tag>
-        <tag>开发笔记</tag>
-      </tags>
-  </entry>
-  <entry>
     <title>关于domain对象与DTO对象间的相互拷贝的思考与优化思路</title>
     <url>/202110/7d2804acf239.html</url>
     <content><![CDATA[<h2 id="问题描述"><a href="#问题描述" class="headerlink" title="问题描述"></a>问题描述</h2><blockquote>
@@ -92,6 +49,49 @@
       </tags>
   </entry>
   <entry>
+    <title>关于金仓数据库不被主流框架(如Activiti,Flowable)支持的思考与解决方案</title>
+    <url>/202110/20007eeb8144.html</url>
+    <content><![CDATA[<h2 id="问题描述"><a href="#问题描述" class="headerlink" title="问题描述"></a>问题描述</h2><blockquote>
+<p>去年底的时候,我们的项目中需要使用工作流实现业务.经过一些讨论,最终决定使用开源引擎Activiti进行集成.在现阶段大环境下,项目要求需要使用自主可控的国产数据库–KingBase.</p>
+</blockquote>
+<blockquote>
+<p>用过Activiti,Flowable的同学应该都知道,这类工具是强依赖数据库的.特别是在项目启动的过程中就会创建一批数据表用于存储BMPN模型,工作流实例和历史数据等.这就导致在项目代码启动连接数据库的时候,就会报错显示 “不支持KingBaseES的数据库”.</p>
+</blockquote>
+<h2 id="问题思考"><a href="#问题思考" class="headerlink" title="问题思考"></a>问题思考</h2><ol>
+<li>通过查看Flowable的文档和源码,我们了解到这类工具在启动时会利用工具 LiquiBase 对数据库的数据表进行初始化(LiquiBase是一个方言无关的数据库版本管理工具).而LiquiBase在运行时会获取数据库产品类型后动态根据资源中的数据表定义生成符合当前数据库方言的建表语句.后运行初始化表;</li>
+<li>从网上公开的知识可以了解到,金仓的数据库KingBase是根据开源数据库PostgreSQL魔改而来,然后通过汇总得知,在KingBase对于pgSQL的差异中包括(但不限于) 命令名,系统表和视图,函数的语法等等.从后端程序员的使用角度出发,能与我们产生兼容性联系的基本都在系统表和视图这部分的差异弥补;</li>
+<li>通过对JDBC标准的了解.我们得知每一个实现了JDBC标准的Driver都需要返回客户端一个字符串以表明自己的数据库名称(类型).所以,如果我们在KingBase的数据库驱动中将产品类型从”KingBaseES”换为”postgresql”.理论上就能骗过工具;</li>
+</ol>
+<h2 id="编码逻辑"><a href="#编码逻辑" class="headerlink" title="编码逻辑"></a>编码逻辑</h2><ol>
+<li>通过对现状的评估,得益于KingBase的魔改对于pgSQL的实现并不是破坏性的.我们觉得最小成本的修改应该是这样的,在关键节点中欺骗Activiti.让其始终认为自己连接的是pgSQL.而不是KingBase;</li>
+<li>KingBase数据库对于pgSQL还修改了所有的系统表和视图,但也仅是修改了前缀(比如pg_tables修改成sys_tables).而在一些开源框架中也会调用这些系统表来实现逻辑.基于此,我们觉得可以手动创建一批视图pg_tables去映射sys_tables;</li>
+</ol>
+<h2 id="实现方案"><a href="#实现方案" class="headerlink" title="实现方案"></a>实现方案</h2><ol>
+<li>反编译kingbase数据库连接驱动kingbase8-8.x.x.jar;找到实现了java.sql.DatabaseMetaData接口的类;</li>
+</ol>
+<figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="comment">// KingBase中实现了DatabaseMetaData的类在com.kingbase8.jdbc.KbDatabaseMetaData类中</span></span><br><span class="line"><span class="comment">// 找到如下的函数 将返回的 &quot;KingbaseES&quot; 修改为 &quot;postgresql&quot;</span></span><br><span class="line"> <span class="keyword">public</span> String <span class="title function_">getDatabaseProductName</span><span class="params">()</span> <span class="keyword">throws</span> SQLException &#123;</span><br><span class="line">     <span class="comment">// return &quot;KingbaseES&quot;;</span></span><br><span class="line">     <span class="keyword">return</span> <span class="string">&quot;postgresql&quot;</span>;</span><br><span class="line">  &#125;</span><br></pre></td></tr></table></figure>
+
+<ol start="2">
+<li>将修改过的KbDatabaseMetaData.class编译后重新打包入驱动中;</li>
+<li>手动到数据库创建视图 pg_tables(如有需要也可创建别的,这里仅作演示目的.);</li>
+</ol>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">create</span> <span class="keyword">view</span> pg_tables <span class="keyword">as</span> <span class="keyword">select</span> <span class="operator">*</span> <span class="keyword">from</span> sys_tables;</span><br></pre></td></tr></table></figure>
+
+<h2 id="其他方案"><a href="#其他方案" class="headerlink" title="其他方案"></a>其他方案</h2><ol>
+<li>依赖于java中的类加载器AppClassLoader中关于加载资源时定义的是个数组,且指向src目录的资源永远在下标零处.所以,只要在src中定义的类永远优先于其他地方的类加载;</li>
+<li>打开你需要集成的工具框架,找到用于解析数据库类型进行后续操作的类.在src下创建同名同路径的java文件;</li>
+<li>复制反编译后类中所有的代码至src目录下的文件后,增加对应的配置以在解析到”KingbaseES”进行自定义操作;</li>
+</ol>
+<h2 id="PS"><a href="#PS" class="headerlink" title="PS"></a>PS</h2><ol>
+<li>LiquiBase是一个方言无关的数据库版本管理工具,真心好用!!!会根据定义好的xml内容对数据库的初始化,数据表版本进行管理,Mekatok即是使用LiquiBase对数据库进行管理.再不需要在项目初次启动时先运行数据库建表脚本,也不需要再针对数据库加字段什么的汇总脚本各个环境先同步数据库.</li>
+</ol>
+]]></content>
+      <tags>
+        <tag>Mekatok</tag>
+        <tag>开发笔记</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>基于事件机制的服务内削峰和低耦合(同步)操作的思考与实现</title>
     <url>/202110/fffaf8a962c8.html</url>
     <content><![CDATA[<h2 id="问题描述"><a href="#问题描述" class="headerlink" title="问题描述"></a>问题描述</h2><blockquote>
@@ -131,6 +131,163 @@
       <tags>
         <tag>Mekatok</tag>
         <tag>开发笔记</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>JDK1.8的新特性及在项目中的一些应用</title>
+    <url>/201904/aa891d5f79a5.html</url>
+    <content><![CDATA[<h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a><em>前言</em></h2><ol>
+<li>从我们将项目的jdk版本更新至1.8后,到目前为止已经有很长时间了.但现在的编程思想还是基于jdk1.6的路子.其实,可以通过一些jdk8的新特性所折射出的思维和工具类来改变我们对编程方式的改变.</li>
+<li>衡量一个高级编程语言的实用性有很多方面.但最基本的无外乎这几点,编程思想,集合机制,垃圾回收机制,异常机制,多线程机制等等.在CPU多核化的当下,串并行流机制也成为衡量的指标之一.如何使用并行技术在多核CPU中来降低程序的执行时间,也将成为我们优化代码效率一个事倍功半的思路.</li>
+<li>就拿我们朝夕相处的Java来说,在对jdk5使用了这么多年以来.在编程的过程中,也发现了一些jdk5的局限性.就拿java引以为傲的OOP来说.它确实是一个很高级的思维方式,在应对业务场景复杂度提高和降低开发门槛上有很大的优越性.但他对某些业务场景简单的应用或单一功能上的表现却显得有点臃肿.举个例子,在我接触的大部分公司中都不是太热衷于使用Spring JPA或Herbinate等OOP思维的ORM框架,反倒更喜欢用Mybatis这种需要直接操作过程语言SQL这样的ORM.他们大多数的理由是Herbinate对于优化的成本偏高.而直接操作SQL的成本低.其实,这就侧面说明了一个问题,在某些方面上我们还是愿意使用POP思维进行编程.当然,造成这个结果的还有一部分原因是使用的是关系数据库.函数式编程和面向对象编程有机的结合在一起才能更好的以敏捷开发的方式来实现业务逻辑.</li>
+<li>NullPointException,程序员最亲切的异常.也是最头疼的异常.没有之一.相较于C语言,几乎所有的高级编程语言都对指针的概念进行尽可能的模糊.但基于堆栈式的存储结构来说,空指针是我们永远也绕不开的一个痛点.</li>
+<li>针对以上的这些问题,jdk8相较于jdk5给了我们一些不敢说完美的解决方案,但还是能说,尚可.</li>
+</ol>
+<h2 id="纲概"><a href="#纲概" class="headerlink" title="纲概"></a><em>纲概</em></h2><ol>
+<li><strong>JDK8新特性</strong>;</li>
+<li><strong>OptionalAPI</strong>;</li>
+<li><strong>Date/TimeAPI</strong>;</li>
+<li><strong>StreamAPI</strong>;</li>
+<li><strong>Lambda表达式</strong>;</li>
+<li><strong>双冒号语法</strong>;</li>
+<li><strong>defalut关键字</strong>;</li>
+</ol>
+<h2 id="内容"><a href="#内容" class="headerlink" title="内容"></a><em>内容</em></h2><ul>
+<li><h3 id="JDK8-部分新特性"><a href="#JDK8-部分新特性" class="headerlink" title="JDK8 部分新特性"></a>JDK8 部分新特性</h3><ul>
+<li><p><strong>Nashorn JavaScript引擎</strong><br>Java 8提供了一个新的Nashorn JavaScript引擎，它允许我们在JVM上运行特定的JS应用。</p>
+</li>
+<li><p><strong>default关键字</strong><br>一直以来java的以”单继承多实现”的方式来诠释面向对象的.但在我们实际操作的过程中,单继承的局限性越来越大.举个例子,我们有如下业务结构,物体类中有一个已实现的getColor方法,车类中有一个已实现的run方法.而货车类要直接继承下这两个方法,但在之前的jdk中java不允许多继承.如果把物体类和车类写成接口的话,对于货车类而言就要自己去实现这两个方法.所以,这个结构在jdk8前是不可能实现的.现在jdk8提供了一个default关键字,支持我们在接口中定义实现.这样的话,就算我们把物体和车定义成接口.货车类也不需要关心这两个方法的实现.</p>
+</li>
+<li><p><strong>Optional空值包装</strong><br>空指针异常,一直以来都是程序员最头疼的一个点,总觉得它无处不在.在应用系统中空指针异常本应是业务缺陷的一种体现.但人非圣贤怎可能察觉所有的问题.但我们又不希望这种错误体现在用户层面,体验感极差.基于这样的诉求,我们尝试使用一种机制使程序在出现空指针的时候能够出现一个备选方案来解决这个问题.而jdk8中的Optional类就是这个机制的体现.首先,我们来看看这个类的定义:</p>
+<blockquote>
+<p>A container object which may or may not contain a non-null value. If a value is present, isPresent() will return true and get() will return the value.Additional methods that depend on the presence or absence of a contained value are provided, such as orElse() (return a default value if value not present) and ifPresent() (execute a block of code if the value is present).<br>翻译:可能包含或不包含非空值的容器对象。如果存在值，isPresent()将返回true，get()将返回该值。提供了依赖于包含值的存在或不存在的其他方法，例如orelse()(如果值不存在，则返回默认值)和ifPresent()(如果值存在，则执行代码块).</p>
+</blockquote>
+  <figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 创建容器,创建一个空容器</span></span><br><span class="line">Optional&lt;SpBaseDto&gt; opt = Optional.empty();</span><br><span class="line"></span><br><span class="line"><span class="comment">// 创建容器,根据对象创建容器</span></span><br><span class="line"><span class="comment">//of()和ofNullable()的功能一致,区别是当dto为空时,of()会抛出空指针</span></span><br><span class="line"><span class="type">SpBaseDto</span> <span class="variable">dto</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">SpBaseDto</span>();</span><br><span class="line">opt = Optional.of(dto);</span><br><span class="line">opt = Optional.ofNullable(dto);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 访问容器中的对象</span></span><br><span class="line">dto = opt.get();</span><br><span class="line"></span><br><span class="line"><span class="comment">// get方法在容器类对象为空的时候,会抛出一个NoSuchElementException.</span></span><br><span class="line"><span class="comment">//所以,我们可以在调用get前使用ifPresent()校验是否为空.</span></span><br><span class="line"><span class="type">boolean</span> <span class="variable">isP</span> <span class="operator">=</span> opt.isPresent();</span><br><span class="line"></span><br><span class="line"><span class="comment">// 当容器中数据不为空时执行代码(后续我们可以使用函数指针替代匿名内部类)</span></span><br><span class="line">opt.ifPresent(<span class="keyword">new</span> <span class="title class_">Consumer</span>&lt;SpBaseDto&gt;()&#123;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">accept</span><span class="params">(SpBaseDto dto)</span>&#123;</span><br><span class="line">        <span class="comment">//Do Something</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 数据过滤,当符合定义的过滤规则或容器内的数据为空时,返回当前对象.</span></span><br><span class="line"><span class="comment">// 否则,返回一个空的容器.</span></span><br><span class="line">opt = opt.filter(<span class="keyword">new</span> <span class="title class_">Predicate</span>&lt;SpBaseDto&gt;()&#123;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="type">boolean</span> <span class="title function_">test</span><span class="params">(SpBaseDto dto)</span>&#123;</span><br><span class="line">        <span class="comment">//Do SomeThing</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 数据操作,返回值为你在内部类中返回的对象加工而成的容器</span></span><br><span class="line">opt = opt.map(<span class="keyword">new</span> <span class="title class_">Function</span>&lt;SpBaseDto,SpBaseDto&gt;()&#123;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="title function_">apply</span><span class="params">(SpBaseDto dto)</span>&#123;</span><br><span class="line">        <span class="comment">//Do SomeThing</span></span><br><span class="line">        <span class="keyword">return</span> dto;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 当数据容器为空时,将调用orElse()覆盖容器内的对象</span></span><br><span class="line">dto = opt.orElse(<span class="keyword">new</span> <span class="title class_">SpBaseDto</span>());</span><br><span class="line"></span><br><span class="line"><span class="comment">// orElseGet(),当容器内对象不为空时,返回对象.</span></span><br><span class="line"><span class="comment">// 否则运行内部类并返回内部类的return.</span></span><br><span class="line">dto = opt.orElseGet(<span class="keyword">new</span> <span class="title class_">Supplier</span>&lt;SpBaseDto&gt;()&#123;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> SpBaseDto <span class="title function_">get</span><span class="params">()</span>&#123;</span><br><span class="line">        <span class="comment">//Do SomeThing</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br><span class="line"></span><br><span class="line"><span class="comment">// orElseThrow,当容器内对象不为空时,返回对象.</span></span><br><span class="line"><span class="comment">// 否则运行内部类并返回内部类的return.内部类必须返回异常或Error</span></span><br><span class="line">dto = opt.orElseThrow(<span class="keyword">new</span> <span class="title class_">Supplier</span>&lt;Throwable&gt;()&#123;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> Throwable <span class="title function_">get</span><span class="params">()</span>&#123;</span><br><span class="line">        <span class="comment">//Do SomeThing</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 场景模拟</span></span><br><span class="line"><span class="type">SpBaseDto</span> <span class="variable">dto</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">SpBaseDto</span>();</span><br><span class="line">Optional&lt;SpBaseDto&gt; opt = Optional.ofNullable(dto);</span><br><span class="line"><span class="comment">//Demo1:断言空指针</span></span><br><span class="line">Optional.ofNullable(dto).orElseThrow(<span class="keyword">new</span> <span class="title class_">Supplier</span>&lt;Throwable&gt;()&#123;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> Throwable <span class="title function_">get</span><span class="params">()</span>&#123;</span><br><span class="line">        <span class="comment">//Do SomeThing</span></span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> <span class="title class_">RunTimeException</span>();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br><span class="line"><span class="comment">// Demo2:数据校验过滤</span></span><br><span class="line">opt = opt.filter(<span class="keyword">new</span> <span class="title class_">Predicate</span>&lt;SpBaseDto&gt;()&#123;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="type">boolean</span> <span class="title function_">test</span><span class="params">(SpBaseDto dto)</span>&#123;</span><br><span class="line">        <span class="comment">//Do SomeThing</span></span><br><span class="line">        <span class="keyword">return</span> <span class="literal">true</span>;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br><span class="line"><span class="comment">// Demo3:数据加工</span></span><br><span class="line">opt = opt.map(<span class="keyword">new</span> <span class="title class_">Function</span>&lt;SpBaseDto,SpBaseDto&gt;()&#123;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="title function_">apply</span><span class="params">(SpBaseDto dto)</span>&#123;</span><br><span class="line">        <span class="comment">//Do SomeThing</span></span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> <span class="title class_">Object</span>();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br></pre></td></tr></table></figure></li>
+<li><p><strong>Date/TimeAPI</strong><br>jdk8在开始研究Java 8日期/时间API之前，让我们先来看一下为什么我们需要这样一个新的API。在Java中，现有的与日期和时间相关的类存在诸多问题，其中包括如下这几个方面:</p>
+<ul>
+<li>Java的日期/时间类的定义并不一致，在java.util和java.sql的包中都有日期类，此外用于格式化和解析的类在java.text包中定义。</li>
+<li>java.util.Date同时包含日期和时间，而java.sql.Date仅包含日期，将其纳入java.sql包并不合理。另外这两个类都有相同的名字，这本身就是一个非常糟糕的设计。</li>
+<li>对于时间、时间戳、格式化以及解析，并没有一些明确定义的类。对于格式化和解析的需求，我们有java.text.DateFormat抽象类，但通常情况下，SimpleDateFormat类被用于此类需求。</li>
+<li>所有的日期类都是可变的，因此他们都不是线程安全的，这是Java日期类最大的问题之一。</li>
+<li>日期类并不提供国际化，没有时区支持，因此Java引入了java.util.Calendar和java.util.TimeZone类，但他们同样存在上述所有的问题</li>
+<li>JDK8以后日期和时间类中包含了一些新的成员:LocalDate,LocalTime,Instant,Dyration以及Period这些.他们均来源自java.time包下.JDK8中的日期API是JSR-310的实现,并且是工作在ISO-8601日历体系基础上的,当然我们也可以在非ISO的日历上.新的日期包如下所示:</li>
+<li><strong>ava.time包</strong>：JDK8中的基础包，所有常用的基础类都是这个包的一部分，如LocalDate，LocalTime，LocalDateTime等等，所有这些类都是不可变且线程安全的；</li>
+<li><strong>java.time.chrono包</strong>：这个包为非ISO的日历系统定义了一些API，我们可以在借助这个包中的一些类扩展我们自己的日历系统；</li>
+<li><strong>java.time.format包</strong>：这个包很明显了，格式化和解析日期时间对象，一般java.time包中的类都差不多能满足我们的需求了，如果有需要，可以调用这个包下的类自定义解析方式；</li>
+<li><strong>java.time.temporal包</strong>：这个包很有意思，封装了一些获取某个特定日期和时间的接口，比如某月的第一天或最后一天，并且这些方法都是属于特别好认的方法。</li>
+<li><strong>java.time.zone包</strong>：这个包就是时区相关的类了。</li>
+</ul>
+  <figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 获取当前日期 now = &quot;2018-01-01&quot;</span></span><br><span class="line"><span class="type">String</span> <span class="variable">now</span> <span class="operator">=</span> LocalDate.now().toString;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 根据年月日,构建时间对象</span></span><br><span class="line"><span class="type">LocalDate</span> <span class="variable">local</span> <span class="operator">=</span> LocalDate.of(<span class="number">2018</span>,<span class="number">1</span>,<span class="number">1</span>);</span><br><span class="line">local = LocalDate.parse(<span class="number">2018</span>-<span class="number">01</span>-<span class="number">01</span>);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 获取本月第一天,本月第N天,本月最后一天,本年第N天,</span></span><br><span class="line"><span class="type">LocalDate</span> <span class="variable">local</span> <span class="operator">=</span> LocalDate.now().with(TemporalAdjusters.firstDayOfMonth());</span><br><span class="line">local = LocalDate.now().withDayOfMonth(n);</span><br><span class="line">local = LocalDate.now().with(TemporalAdjusters.lastDayOfMonth());</span><br><span class="line">local = localDate.withDayOfYear(n);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 后N天,前N天</span></span><br><span class="line"><span class="type">LocalDate</span> <span class="variable">local</span>  <span class="operator">=</span> localDate.plusDays(n);</span><br><span class="line">local = localDate.minusDays(n);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 计算两个日期间的天数,周数,月数,年数</span></span><br><span class="line"><span class="type">LocalDate</span> <span class="variable">now</span> <span class="operator">=</span> LocalDate.now();</span><br><span class="line"><span class="type">LocalDate</span> <span class="variable">local</span> <span class="operator">=</span> LocalDate.of(<span class="number">2018</span>,<span class="number">1</span>,<span class="number">1</span>);</span><br><span class="line"><span class="type">long</span> <span class="variable">a</span> <span class="operator">=</span> now.until(local,ChronoUnit.DAYS);</span><br><span class="line">a = now.until(local,ChronoUnit.WEEKS);</span><br><span class="line">a = now.until(local,ChronoUnit.MONTHS);</span><br><span class="line">a = now.until(local,ChronoUnit.YEARS);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 获取当前时间 now = &quot;18:01:01.001&quot;</span></span><br><span class="line"><span class="type">String</span> <span class="variable">now</span> <span class="operator">=</span> LocalTime.now().toString();</span><br><span class="line"></span><br><span class="line"><span class="comment">// 构建时间</span></span><br><span class="line"><span class="type">LocalTime</span> <span class="variable">time</span> <span class="operator">=</span> LocalTime.of(<span class="number">12</span>, <span class="number">15</span>, <span class="number">30</span>);</span><br><span class="line">time = LocalTime.parse(<span class="string">&quot;12:15:30&quot;</span>);</span><br><span class="line"><span class="comment">//获取当前时间，不包含毫秒数</span></span><br><span class="line">time = time.withNano(<span class="number">0</span>)</span><br><span class="line"></span><br><span class="line"><span class="comment">// 获取当前日期与时间</span></span><br><span class="line"><span class="type">LocalDateTime</span> <span class="variable">localDateTime</span> <span class="operator">=</span> LocalDateTime.now();</span><br><span class="line">localDateTime = LocalDateTime.of(LocalDate.now(), LocalTime.now());</span><br><span class="line">localDateTime = LocalDateTime.of(<span class="number">2018</span>, <span class="number">01</span>, <span class="number">29</span>, <span class="number">19</span>, <span class="number">23</span>, <span class="number">13</span>);</span><br><span class="line"><span class="comment">// 格式化打印</span></span><br><span class="line"><span class="type">String</span> <span class="variable">formatter</span> <span class="operator">=</span> DateTimeFormatter.ofPattern(<span class="string">&quot;yyyy/MM/dd&quot;</span>).format(localDateTime);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 计算类,计算两个日期的差</span></span><br><span class="line"><span class="type">Period</span> <span class="variable">period</span> <span class="operator">=</span> Period.between(localDate, localDate1);</span><br><span class="line"><span class="type">String</span> <span class="variable">days</span> <span class="operator">=</span> period.getDays();</span><br><span class="line"><span class="type">String</span> <span class="variable">week</span> <span class="operator">=</span> period.getWeeks();</span><br><span class="line">String month,year ...</span><br><span class="line"></span><br><span class="line"><span class="type">LocalDateTime</span> <span class="variable">oldDate</span> <span class="operator">=</span> LocalDateTime.of(<span class="number">2017</span>, Month.AUGUST, <span class="number">31</span>, <span class="number">10</span>, <span class="number">20</span>, <span class="number">55</span>);</span><br><span class="line"><span class="type">LocalDateTime</span> <span class="variable">newDate</span> <span class="operator">=</span> LocalDateTime.of(<span class="number">2018</span>, Month.NOVEMBER, <span class="number">9</span>, <span class="number">10</span>, <span class="number">21</span>, <span class="number">56</span>);</span><br><span class="line"><span class="type">long</span> <span class="variable">years</span> <span class="operator">=</span> ChronoUnit.YEARS.between(oldDate, newDate);</span><br><span class="line"><span class="type">long</span> <span class="variable">months</span> <span class="operator">=</span> ChronoUnit.MONTHS.between(oldDate, newDate);</span><br><span class="line"><span class="type">long</span> <span class="variable">weeks</span> <span class="operator">=</span> ChronoUnit.WEEKS.between(oldDate, newDate);</span><br><span class="line"><span class="type">long</span> <span class="variable">days</span> <span class="operator">=</span> ChronoUnit.DAYS.between(oldDate, newDate);</span><br><span class="line"><span class="type">long</span> <span class="variable">hours</span> <span class="operator">=</span> ChronoUnit.HOURS.between(oldDate, newDate);</span><br><span class="line"><span class="type">long</span> <span class="variable">minutes</span> <span class="operator">=</span> ChronoUnit.MINUTES.between(oldDate, newDate);</span><br><span class="line"><span class="type">long</span> <span class="variable">seconds</span> <span class="operator">=</span> ChronoUnit.SECONDS.between(oldDate, newDate);</span><br><span class="line"><span class="type">long</span> <span class="variable">milis</span> <span class="operator">=</span> ChronoUnit.MILLIS.between(oldDate, newDate);</span><br><span class="line"><span class="type">long</span> <span class="variable">nano</span> <span class="operator">=</span> ChronoUnit.NANOS.between(oldDate, newDate);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 计算类,计算两个时间的秒数差 PS这个方法的两个参数中必须有秒,否则会UnsupportedTemporalTypeException</span></span><br><span class="line"><span class="type">LocalDateTime</span> <span class="variable">localDate1</span> <span class="operator">=</span> LocalDate.of(<span class="number">2018</span>, <span class="number">02</span>, <span class="number">28</span>,<span class="number">0</span>,<span class="number">0</span>,<span class="number">0</span>);</span><br><span class="line"><span class="type">LocalDateTime</span> <span class="variable">localDate2</span> <span class="operator">=</span> LocalDate.of(<span class="number">2018</span>, <span class="number">02</span>, <span class="number">27</span>,<span class="number">0</span>,<span class="number">0</span>,<span class="number">0</span>);</span><br><span class="line"><span class="type">Duration</span> <span class="variable">duration</span> <span class="operator">=</span> Duration.between(localDate1, localDate2);</span><br><span class="line"><span class="type">String</span> <span class="variable">seconds</span> <span class="operator">=</span> duration.getSeconds();</span><br><span class="line"></span><br><span class="line"><span class="comment">// 时区,默认时区</span></span><br><span class="line"><span class="type">Clock</span> <span class="variable">systemDefaultClock</span> <span class="operator">=</span> Clock.systemDefaultZone();</span><br><span class="line"><span class="type">String</span> <span class="variable">time</span> <span class="operator">=</span> LocalDateTime.now(systemDefaultClock).toString();</span><br><span class="line"></span><br><span class="line"><span class="comment">// 时区,芝加哥</span></span><br><span class="line"><span class="type">Clock</span> <span class="variable">systemDefaultClock</span> <span class="operator">=</span> Clock.system(ZoneId.of(ZoneId.SHORT_IDS.get(<span class="string">&quot;CST&quot;</span>)));</span><br><span class="line"><span class="type">String</span> <span class="variable">time</span> <span class="operator">=</span> LocalDateTime.now(systemDefaultClock).toString();</span><br><span class="line"></span><br><span class="line"><span class="type">Date</span> <span class="variable">date</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">Date</span>();</span><br><span class="line"></span><br><span class="line"><span class="comment">// Date -&gt; LocalDateTime</span></span><br><span class="line"><span class="type">LocalDateTime</span> <span class="variable">localDateTime</span> <span class="operator">=</span> date.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();</span><br><span class="line">localDateTime = LocalDateTime.ofInstant(date.toInstant(), ZoneId.systemDefault());</span><br><span class="line"></span><br><span class="line"><span class="comment">// Date -&gt; LocalDate</span></span><br><span class="line"><span class="type">LocalDate</span> <span class="variable">localDate</span> <span class="operator">=</span> date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();</span><br><span class="line"></span><br><span class="line"><span class="comment">// Date -&gt; LocalTime</span></span><br><span class="line"><span class="type">LocalTime</span> <span class="variable">localTime</span> <span class="operator">=</span> date.toInstant().atZone(ZoneId.systemDefault()).toLocalTime();</span><br><span class="line"></span><br><span class="line"><span class="comment">// LocalDate -&gt; Date</span></span><br><span class="line">date = Date.from(localDateTime.atZone(ZoneId.systemDefault()).toInstant());</span><br><span class="line">date = Date.from(localDate.atStartOfDay(ZoneId.systemDefault()).toInstant());</span><br><span class="line"></span><br><span class="line"><span class="comment">// 其他</span></span><br><span class="line">Year.now();</span><br><span class="line">Month.now();</span><br></pre></td></tr></table></figure></li>
+<li><p><strong>Lambda表达式</strong></p>
+</li>
+</ul>
+<ol>
+<li><p>我们在学习C语言的时候,都听说过一个名词”函数指针”,本质上就是内存中方法区内方法地址在栈中的一个指向.像java一样的高级编程语言都在尽可能的模糊指针的概念,就更别说方法区的指针了.当然,这也和OOP思想背道而驰.但是,在编程到达一定程度以后,我们其实还是比较喜欢用底层些的东西.虽然这样风险,成本都会提升会很大,只是他带来的便捷却终是让我们觉得值得铤而走险.而在java中,那帮写jdk的Coder就使用了一种别的途径来实现了这个我们朝思暮想的功能.</p>
+</li>
+<li><p>虽然看起来很先进,其实Lambda表达式的本质还只是一颗语法糖,有编译器推断并帮助你转换包装为正常的代码.因此我们可以使用更少的代码来实现同样的功能.不过,对于程序员而言,这也带来了一个问题,那就是在逻辑相同的代码中越简洁也就意味着越难懂.这也许算是一个怪圈吧,每个程序员都希望自己的代码即简洁又易懂.</p>
+</li>
+<li><p>言归正传.既然是语法糖,也就意味着在没改变虚拟机的情况下,编译器干了原来该我们干的活.那具体编译器帮我们干了什么呢?看下面的两端代码.</p>
+ <figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 第一段,Lambda表达式.这是一个最简单的Lambda表达式</span></span><br><span class="line">Arrays.asList(<span class="string">&quot;1&quot;</span>,<span class="string">&quot;2&quot;</span>).forEach((a)-&gt;&#123;</span><br><span class="line">    a.toString();</span><br><span class="line">&#125;);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 现在,我们来看看List的父类Iterable中看看forEach()源码是怎么定义的,居然可以传入一段代码块;</span></span><br><span class="line"><span class="keyword">default</span> <span class="keyword">void</span> <span class="title function_">forEach</span><span class="params">(Consumer&lt;? <span class="built_in">super</span> T&gt; action)</span> &#123;</span><br><span class="line">    Objects.requireNonNull(action);</span><br><span class="line">    <span class="keyword">for</span> (T t : <span class="built_in">this</span>) &#123;</span><br><span class="line">        action.accept(t);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 很矛盾,形式参数明明是一个接口类型,为什么入参却是代码块.</span></span><br><span class="line"><span class="comment">// 从这段代码中,我们看到了方法接收一个Consumer接口.</span></span><br><span class="line"><span class="comment">// 并在类中调用了接口的accept()函数,那我们再看看Consumer接口.</span></span><br><span class="line"><span class="meta">@FunctionalInterface</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">interface</span> <span class="title class_">Consumer</span>&lt;T&gt; &#123;</span><br><span class="line">    <span class="keyword">void</span> <span class="title function_">accept</span><span class="params">(T t)</span>;</span><br><span class="line">    <span class="keyword">default</span> Consumer&lt;T&gt; <span class="title function_">andThen</span><span class="params">(Consumer&lt;? <span class="built_in">super</span> T&gt; after)</span> &#123;</span><br><span class="line">        Objects.requireNonNull(after);</span><br><span class="line">        <span class="keyword">return</span> (T t) -&gt; &#123; accept(t); after.accept(t); &#125;;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 从Consumer接口的源码中我们看到了它也就定义了一个且只有一个抽象方法,</span></span><br><span class="line"><span class="comment">// 有且只有一个抽象方法,这是这个接口的重点.</span></span><br><span class="line"><span class="comment">// 等等,如果这只是一个接口的话,我们岂不是可以通过匿名内部类的方式实现调用?</span></span><br><span class="line"><span class="comment">// 就像,下面这样.</span></span><br><span class="line">Arrays.asList(<span class="string">&quot;1&quot;</span>,<span class="string">&quot;2&quot;</span>).forEach(<span class="keyword">new</span> <span class="title class_">Consumer</span>&lt;T&gt;()&#123;</span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">accept</span><span class="params">(T a)</span>&#123;</span><br><span class="line">        a.toString();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 没错,这样也是可以的.</span></span><br><span class="line"><span class="comment">// 现在,我们知道编译器在在见到Lambda后,帮助我们做了些什么吧!</span></span><br><span class="line"><span class="comment">// 就是把Lambda代码块转换成了上面这段包含了匿名内部类的代码.</span></span><br><span class="line"><span class="comment">// 我们都知道,接口中是定义多个抽象方法的.</span></span><br><span class="line"><span class="comment">// 到这里,也许,有的人会问了.那编译器是怎么知道我的Lambda代码块是</span></span><br><span class="line"><span class="comment">// 实现哪个抽象函数的? </span></span><br><span class="line"><span class="comment">// 我们再回去看看这个接口的源码,发现他有一个标签修饰</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// @FunctionalInterface 我们看看它的源码</span></span><br><span class="line"><span class="meta">@Documented</span></span><br><span class="line"><span class="meta">@Retention(RetentionPolicy.RUNTIME)</span></span><br><span class="line"><span class="meta">@Target(ElementType.TYPE)</span></span><br><span class="line"><span class="keyword">public</span> <span class="meta">@interface</span> FunctionalInterface &#123;&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 从上面的代码发现这是一个运行时标签,接口的介绍我就不粘贴了.</span></span><br><span class="line"><span class="comment">// 大意是,这个标签的作用是告诉编译器,这个标签修饰的接口</span></span><br><span class="line"><span class="comment">// 只能有一个抽象方法,否则报错.</span></span><br><span class="line"><span class="comment">// 返回来,还记得我们上面说的吗?这个接口中有且只有一个抽象方法.</span></span><br><span class="line"><span class="comment">// 编译器就是这么找到Lambda表达式要去实现哪个方法.</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 好了,到这里.我们应该就知道了Lambda其实就这么简单.</span></span><br><span class="line"><span class="comment">// 既然知道原理了,我们先来看看JDK为我们提供了哪些像Consumer一样的接口</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// Consumer 接收一个参数,无返回.</span></span><br><span class="line"><span class="comment">// Function 接收一个参数,返回一个参数.</span></span><br><span class="line"><span class="comment">// Predicate 接收一个参数,返回一个布尔.</span></span><br><span class="line"><span class="comment">// Supplier 无接收参数,返回一个参数.</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 上面列举出来的四个典型的接口均来自java.util.function包下</span></span><br><span class="line"><span class="comment">// 这个包下还有很多定义好的接口,在这里就不一一列举了.</span></span><br><span class="line"><span class="comment">// 接下来,我们就又要问了,这些定义好的接口.不都把入参和出参的个数都定义好了.</span></span><br><span class="line"><span class="comment">// 举个例子,那如果我有一个需要六个入参,且返回一个Map出参的话,怎么办?</span></span><br><span class="line"><span class="comment">// 那我们就自己写接口定义吧.</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 第一部分,定义接口</span></span><br><span class="line"><span class="meta">@FunctionalInterface</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">interface</span> <span class="title class_">MyLambda</span>&lt;A,B,C,D,E,F,G&gt; &#123;</span><br><span class="line">    G <span class="title function_">run</span><span class="params">(A a,B b,C c,D d,E e,F f)</span>;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 第二部分,定义生产者.类似于List中的forEach()函数</span></span><br><span class="line"><span class="keyword">public</span> G <span class="title function_">go</span><span class="params">(MyLambda&lt;A,B,C,D,E,F,G extends Map&gt; tag)</span>&#123;</span><br><span class="line">    <span class="comment">//创建 a,b,c,d,e,f</span></span><br><span class="line">    <span class="type">G</span> <span class="variable">g</span> <span class="operator">=</span> tag.run(a,b,c,d,e,f);</span><br><span class="line">    <span class="keyword">return</span> g;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 第三部分,定义消费者.</span></span><br><span class="line">obj.go((a,b,c,d,e,f)-&gt;&#123;</span><br><span class="line">    <span class="comment">//操作a,b,c,d,e,f,创建g</span></span><br><span class="line">    retrun g;</span><br><span class="line">&#125;);</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+</li>
+</ol>
+<ul>
+<li><strong>双冒号语法及行为对象化</strong><br>上面的内容,我们聊了聊jdk8新引入的函数指针(Lambda)相关操作,但这些都是基于代码块的.有时候,我们希望将我们已经在类中的定义好的函数做为Lambda式实参.难不成我还得再写一遍?</li>
+</ul>
+<p>  当然不用,这个时候就需要我们的::(双冒号语法)了.</p>
+<pre><code>  <figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 很多时候,我们在工具类中写了工具方法.</span></span><br><span class="line"><span class="comment">// 而在某些场景下我们可能需要使用这些工具类,</span></span><br><span class="line"><span class="comment">// 想当然,咱们都会这么写吧?</span></span><br><span class="line">obj.stream().filter((e) -&gt; StringUtils.isNull(e));</span><br><span class="line"></span><br><span class="line"><span class="comment">// 这不相当于,我写了一个代码块实现后,又在代码块中调用工具类?</span></span><br><span class="line"><span class="comment">// 如果,有一种方式能让我们直接将已经定义好的isNull()函数</span></span><br><span class="line"><span class="comment">// 直接包装成代码块实现就好了. 看下面代码.</span></span><br><span class="line">obj.stream().filter(StringUtils::isNull);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 完美解决.</span></span><br><span class="line"><span class="comment">// 那我们现在看看是什么原理吧.如果这么写,我们应该就看懂了.</span></span><br><span class="line">Function&lt;String,<span class="type">boolean</span>&gt; function = StringUtils::isNull;</span><br><span class="line">obj.stream().filter(predicate);</span><br><span class="line"></span><br><span class="line"><span class="comment">// Predicate接口,我们上面说过是一个接收一个参数,返回一个参数的接口.</span></span><br><span class="line"><span class="comment">// 这就是将isNull()包装成了Predicate接口的匿名实现.</span></span><br><span class="line"><span class="comment">// 而在filter中调用这个接口的实现.</span></span><br><span class="line"><span class="comment">// java中有一种语法叫双冒号语法,他允许将我们把已经定义在类中的函数</span></span><br><span class="line"><span class="comment">// 包装成Lambda式的匿名实现.</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 接下来我们说说这个 :: 可以帮我们包装哪些函数</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 构造器</span></span><br><span class="line">Supplier&lt;Object&gt; obj = Object::<span class="keyword">new</span>;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 有参构造器 Bifunction 是一个接收两个参数,返回一个参数.</span></span><br><span class="line">BiFunction&lt;String,String,Dic&gt; dic = Dic::<span class="keyword">new</span>;</span><br><span class="line"><span class="type">Dic</span> <span class="variable">d</span> <span class="operator">=</span> dic.apply(<span class="string">&quot;key&quot;</span>,<span class="string">&quot;value&quot;</span>);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 静态方法,如上</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 非静态方法</span></span><br><span class="line">BiFunction&lt;Dic,String,String&gt; function = Did::getValue;</span><br><span class="line"><span class="type">String</span> <span class="variable">value</span> <span class="operator">=</span> function.apply(<span class="keyword">new</span> <span class="title class_">Dic</span>(),<span class="string">&quot;key&quot;</span>);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 从上面的代码,我们可以看出::冒号语法</span></span><br><span class="line"><span class="comment">// 可以将我们常用的方法均包装成Lambda.</span></span><br><span class="line"><span class="comment">// 我们看的可能有点闷,参数都是怎么对应的啊.</span></span><br><span class="line"><span class="comment">// 现在我们一一说明.其实java中的方法本质上只有两种静态和非静态</span></span><br><span class="line"><span class="comment">// 构造器本质上也是一个静态方法嘛,这我们都学过.</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 我们想说静态方法,在定义用于Lambda的接口时,有一个不成文的规定</span></span><br><span class="line"><span class="comment">// 这个规矩,及时不遵守也没事.但最好遵守.就比如驼峰命名法.</span></span><br><span class="line"><span class="comment">// 言归正传,在官方定义在java.util.function包下的接口.</span></span><br><span class="line"><span class="comment">// 但凡有返回值且是对象的,返回值的类型都是通过最后一个泛型来定义的.</span></span><br><span class="line"><span class="comment">// 所以,我们在使用::定义静态方法时,</span></span><br><span class="line"><span class="comment">// 第一步,将入参+出参个数想加.void表示0;</span></span><br><span class="line"><span class="comment">// 第二步,找一个(或自己写一个)和加出的和一致的Lambda接口.</span></span><br><span class="line"><span class="comment">// 第三步,在声明定义这个接口的泛型时,先将入参按顺序写入.</span></span><br><span class="line"><span class="comment">// 第四步,如果有出参,就将出参写在最后.</span></span><br><span class="line"><span class="comment">// 第五步,调用接口中唯一的方法.</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 我们再来说说非静态方法,</span></span><br><span class="line"><span class="comment">// 静态和非静态最大的区别就在于方法中有无this关键字.</span></span><br><span class="line"><span class="comment">// 如果我们解决了this关键字的指向,那非静态方法也就不特殊了.</span></span><br><span class="line"><span class="comment">// 第一步,将入参+出参个数想加.void表示0.之后再加1(this);</span></span><br><span class="line"><span class="comment">// 第二步,找一个(或自己写一个)和加出的和一致的Lambda接口.</span></span><br><span class="line"><span class="comment">// 第三步,在声明定义这个接口的泛型时,</span></span><br><span class="line"><span class="comment">// 先将第一个参数写成一个实例对象(this),然后入参按顺序写入.</span></span><br><span class="line"><span class="comment">// 第四步,如果有出参,就将出参写在最后.</span></span><br><span class="line"><span class="comment">// 第五步,调用接口中唯一的方法.</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 其实,非静态函数还可以这么包装,但都是大同小异.</span></span><br><span class="line"><span class="type">Dic</span> <span class="variable">dic</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">Dic</span>();</span><br><span class="line">Function&lt;String,String&gt; fx = dic::getValue;</span><br><span class="line"><span class="type">String</span> <span class="variable">value</span> <span class="operator">=</span> fx.apply(<span class="string">&quot;key&quot;</span>);</span><br></pre></td></tr></table></figure>
+  
+</code></pre>
+<ul>
+<li><strong>Stream数据流操作</strong></li>
+</ul>
+<ol>
+<li><p>Stream是Java8的一大亮点,没有之一.它与java.io包里的InputStream和OutputStream是完全不同的概念。是对容器对象功能的增强，它专注于对容器对象进行各种非常便利、高效的 聚合操作（aggregate operation）或者大批量数据操作。Stream API借助于同样新出现的Lambda表达式，极大的提高编程效率和程序可读性。同时，它提供串行和并行两种模式进行汇聚操作，并发模式能够充分利用多核处理器的优势，使用fork/join并行方式来拆分任务和加速处理过程。所以说，Java8中首次出现的 java.util.stream是一个函数式语言+多核时代综合影响的产物。</p>
+</li>
+<li><p>在当今这个数据大爆炸的时代，在数据来源多样化、数据海量化的今天，很多时候不得不脱离 RDBMS，或者以底层返回的数据为基础进行更上层的数据统计。而Java的集合API中，仅仅有极少量的辅助型方法，更多的时候是程序员需要用Iterator来遍历集合，完成相关的聚合应用逻辑，这是一种远不够高效、且笨拙的方法。</p>
+</li>
+<li><p>Stream不是集合元素，它不是数据结构并不保存数据，它是有关算法和计算的，它更像一个高级版本的Iterator。原始版本的Iterator，用户只能显式地一个一个遍历元素并对其执行某些操作；高级版本的Stream，用户只要给出需要对其包含的元素执行什么操作，比如，“过滤掉长度大于 10 的字符串”、“获取每个字符串的首字母”等，Stream会隐式地在内部进行遍历，做出相应的数据转换。Stream就如同一个迭代器（Iterator），单向，不可往复，数据只能遍历一次，遍历过一次后即用尽了，就好比流水从面前流过，一去不复返。</p>
+</li>
+<li><p>而和迭代器又不同的是，Stream可以并行化操作，迭代器只能命令式地、串行化操作。顾名思义，当使用串行方式去遍历时，每个item读完后再读下一个item。而使用并行去遍历时，数据会被分成多个段，其中每一个都在不同的线程中处理，然后将结果一起输出。Stream的并行操作依赖于Java7中引入的Fork/Join框架（JSR166y）来拆分任务和加速处理过程。</p>
+</li>
+<li><p>简单说，对Stream的使用就是实现一个filter-map-reduce过程，产生一个最终结果，或者导致一个副作用（side effect）.Stream的几大特点:<em><strong>Stream不会存储元素;Stream不会改变源对象，相反他们会返回一个持有结果的新的Stream;Stream操作是延迟执行的，这意味着他们等到需要结果的时候才会执行（惰性求值）;</strong></em></p>
+<figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 串行流创建</span></span><br><span class="line">Stream&lt;Integer&gt; s = <span class="keyword">new</span> <span class="title class_">ArrayList</span>&lt;Integer&gt;().stream();</span><br><span class="line"></span><br><span class="line">Integer[] nums = <span class="keyword">new</span> <span class="title class_">Integer</span>[<span class="number">10</span>];</span><br><span class="line">Stream&lt;Integer&gt; stream1 = Arrays.stream(nums);</span><br><span class="line"></span><br><span class="line">Stream&lt;Integer&gt; stream = Stream.of(<span class="number">1</span>,<span class="number">2</span>,<span class="number">3</span>,<span class="number">4</span>,<span class="number">5</span>,<span class="number">6</span>);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 无限流 generate不是一次对每个新生成的值应用函数</span></span><br><span class="line">Stream&lt;Integer&gt; stream3 = Stream.iterate(<span class="number">0</span>, (x) -&gt; x + <span class="number">1</span>);</span><br><span class="line"></span><br><span class="line">Stream&lt;Integer&gt; stream = Stream.generate(() -&gt; <span class="number">1</span>);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 其他方式</span></span><br><span class="line">String str=<span class="string">&quot;1234645&quot;</span>;</span><br><span class="line"><span class="type">IntStream</span> <span class="variable">stream</span> <span class="operator">=</span> str.chars();</span><br><span class="line"></span><br><span class="line"><span class="comment">// Stream流中的方法</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 忽略流中的前几个元素</span></span><br><span class="line">stream.skip(<span class="type">long</span>);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 忽略流中的后几个元素</span></span><br><span class="line">stream.limit(<span class="type">long</span>);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 过滤流中的数据,生成一个新的流,新生成的流中的数据是</span></span><br><span class="line"><span class="comment">// 原流中符合要求的.</span></span><br><span class="line">stream.filter(x -&gt; x&gt;<span class="number">0</span>);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 转换集合中的每一个元素,根据Lambda返回的值.</span></span><br><span class="line">stream.map(x -&gt; x++);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 将集合内元素进行聚合操作,返回一个值.</span></span><br><span class="line">stream.reduce();</span><br><span class="line"></span><br><span class="line"><span class="comment">// 将流中的数据打包.</span></span><br><span class="line">stream.collect(Collectors.toList());</span><br><span class="line"></span><br></pre></td></tr></table></figure></li>
+</ol>
+</li>
+</ul>
+<h2 id="写在最后"><a href="#写在最后" class="headerlink" title="写在最后"></a>写在最后</h2><p>从前几年开始,java的更新就已经进入了快车道. 每一个版本的更新都或多或少有一些新的编程思想在里面.就现状而言,咱们已经落伍了.</p>
+]]></content>
+      <tags>
+        <tag>JDK</tag>
+        <tag>代码片段</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>决不能碰的九种人生状态</title>
+    <url>/201809/d67a7846d098.html</url>
+    <content><![CDATA[<h2 id="犹豫不决"><a href="#犹豫不决" class="headerlink" title="犹豫不决"></a>犹豫不决</h2><blockquote>
+<p>比鲁莽更糟糕的是犹豫不决</p>
+</blockquote>
+<p>像墙头草一样摇摆不定的人,无论其他方面多么强大.在生命的竞赛中总是容易被哪些坚定地人挤到一边.雷厉风行难免会犯错,但比什么也不敢做强.</p>
+<p>海特·黑德说: “<em><strong>畏惧错误就是毁灭进步</strong></em>“</p>
+<h2 id="拖延"><a href="#拖延" class="headerlink" title="拖延"></a>拖延</h2><blockquote>
+<p>计划很丰满,执行很骨感.</p>
+</blockquote>
+<p>很多时候拖延就是在逃避问题和懒惰. 把横在面前的困难放大,望而却步,抱着能拖一天是一天的心态各种借口逃避.</p>
+<p>罗曼·罗兰说: “<em><strong>懒惰是很奇怪的东西,他让你以为那是安逸,是休息,是福气;但实际上它说给你的是无聊,是倦怠,是消沉.</strong></em>“</p>
+<h2 id="三分钟热度"><a href="#三分钟热度" class="headerlink" title="三分钟热度"></a>三分钟热度</h2><blockquote>
+<p>世界上有80%的失败都源于半途而废.</p>
+</blockquote>
+<p>“三分钟热度”的人不过是从来没有体验到坚持做一件事成功后带来的喜悦,因为坚持的过程总是枯燥又充满挫折的,人的天性又是好逸恶劳.</p>
+<h2 id="害怕拒绝"><a href="#害怕拒绝" class="headerlink" title="害怕拒绝"></a>害怕拒绝</h2><blockquote>
+<p>厚重而脆弱的自尊.</p>
+</blockquote>
+<p>大多数时候,我们在人际关系中感受到的”痛”,都和”感到被拒绝”有关.</p>
+<p>有时候这种拒绝是很明显的,比如爱人突然的离去或者被朋友背叛和疏远.</p>
+<p>而有时这种拒绝也可以是很细微的,比如你给了对方一个微笑的眼神,对方却移开了目光;或者你鼓起勇气给对方发了一个微信,对方却过很久才简短回复.</p>
+<p>一个能放下自尊去做事情的人,是遵从目标成果导向的人;而把自尊心放在第一位的人,在人际交往做事情的时候,总关注在他人对自己的态度.</p>
+<p>所以,一个人越是百无一用的时候,越质量于那些无足轻重的底线与小自尊心.</p>
+<h2 id="自我设限"><a href="#自我设限" class="headerlink" title="自我设限"></a>自我设限</h2><blockquote>
+<p>杀死自己的潜能力.</p>
+</blockquote>
+<p>他们经常这样说:我想做A,但是我怕做不到,因为B,C,D,E等等原因.</p>
+<p>他们还没去做之前,就先否定自己,并给自己找一堆不付出努力的理由.</p>
+<p>在自己的心里默认一个”高度”,这个”心理高度”尝尝暗示自己.这件事情我肯定没办法做好,就做到差不多就可以了.</p>
+<p>这种心理暗示可以帮我阻挡任务失败带来的挫败感,暂时维护我的自我价值感.但是,却也剥夺了我”往上再走一步”的成功机会.</p>
+<p>拉罗什富科说: “<em><strong>平庸的人总是在抱怨自己不懂的东西.</strong></em>“</p>
+<h2 id="逃避现实"><a href="#逃避现实" class="headerlink" title="逃避现实"></a>逃避现实</h2><blockquote>
+<p>白日梦患者.</p>
+</blockquote>
+<ul>
+<li>经常做白日梦—-逃避现实更愿意营造一个属于自己的小世界.</li>
+<li>喜欢随心所欲,无拘无束的生活—-说白了就是向往游手好闲的生活.</li>
+<li>沉迷游戏或是魔幻小说—-他们可以引领你走进那个神奇浩繁的世界,让你逃避日常现实生活.</li>
+<li>觉得现实世界很残酷—-这是逃避现实者的常见特征,在追寻白日梦的时候往往会遭受来自现实生活的打击.</li>
+<li>无法面对不确定环境—-因为在你营造的白日梦里,你才能找到安全感.</li>
+</ul>
+<p>人的悲剧在于眼高手低.大多数人激动时佛挡杀佛,幻想中睥睨天下.日常生活中却没法鼓起勇气和每个周末早上都要拿电钻钻墙的邻居好好谈一谈.</p>
+<h2 id="总找借口"><a href="#总找借口" class="headerlink" title="总找借口"></a>总找借口</h2><blockquote>
+<p>错不在我.</p>
+</blockquote>
+<p>人一旦犯了错,第一反应常常是自我辩护.</p>
+<p>喜欢找借口的人,他们都有一个共同的特点:没有强烈的事业心,没有执着的追求,人生没有一个坚定的信念.</p>
+<p>所以,遇到压力,遇到困难,他们就不承担,也不想承担;遇到风险,遇到挑战,就退缩.</p>
+<p>不承担,要退缩,就迫使他们找借口.因为找借口是最容易办到的事情,这是掩饰自己无知的方法,然后从中寻找自我安慰.</p>
+<h2 id="恐惧"><a href="#恐惧" class="headerlink" title="恐惧"></a>恐惧</h2><blockquote>
+<p>谨小慎微的懦弱.</p>
+</blockquote>
+<p>他们在工作中总会有这样的感受:害怕被领导批评,害怕别人觉得自己无能,害怕被别人知道自己的缺点,在意他人的评价,害怕犯错,害怕自己的付出得不到回报.</p>
+<p>我不敢下苦工琢磨自己,怕终于知道自己并非珠玉;然而心中有存着一丝希翼,便又不甘心与瓦砾为伍.其实就是心智的弱小,不愿意面对挫折感.</p>
+<p>王朔曾经跟他女儿说: “<em><strong>煲汤比写诗重要,自己的手艺比男人重要,头发和胸和腰和屁股比脸蛋重要,内心强大到混蛋比什么都重要.</strong></em>“</p>
+<h2 id="拒绝学习"><a href="#拒绝学习" class="headerlink" title="拒绝学习"></a>拒绝学习</h2><blockquote>
+<p>不是寂寞,只是不想学习.</p>
+</blockquote>
+<p>学习需要费脑子,自我成长需要不断和自己做斗争,多痛苦啊!</p>
+<p>还不如舒舒服服躺在家玩手机看电影,然后等看到同龄人薪资比你高,生活过的比你好时,你又在朋友圈感叹时运不济.</p>
+<p>我从未见过,每天从早忙到晚,拖着疲倦的身子回家的人感叹过 空虚寂寞冷.</p>
+<p>大多数人的空虚寂寞冷,基本上都是吃饱了没事干闲的.</p>
+]]></content>
+      <tags>
+        <tag>生活态度</tag>
       </tags>
   </entry>
 </search>
