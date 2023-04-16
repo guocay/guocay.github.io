@@ -1,49 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <search>
   <entry>
-    <title>关于金仓数据库不被主流框架(如Activiti,Flowable)支持的思考与解决方案</title>
-    <url>/202110/20007eeb8144.html</url>
-    <content><![CDATA[<h2 id="问题描述"><a href="#问题描述" class="headerlink" title="问题描述"></a>问题描述</h2><blockquote>
-<p>去年底的时候,我们的项目中需要使用工作流实现业务.经过一些讨论,最终决定使用开源引擎Activiti进行集成.在现阶段大环境下,项目要求需要使用自主可控的国产数据库–KingBase.</p>
-</blockquote>
-<blockquote>
-<p>用过Activiti,Flowable的同学应该都知道,这类工具是强依赖数据库的.特别是在项目启动的过程中就会创建一批数据表用于存储BMPN模型,工作流实例和历史数据等.这就导致在项目代码启动连接数据库的时候,就会报错显示 “不支持KingBaseES的数据库”.</p>
-</blockquote>
-<h2 id="问题思考"><a href="#问题思考" class="headerlink" title="问题思考"></a>问题思考</h2><ol>
-<li>通过查看Flowable的文档和源码,我们了解到这类工具在启动时会利用工具 LiquiBase 对数据库的数据表进行初始化(LiquiBase是一个方言无关的数据库版本管理工具).而LiquiBase在运行时会获取数据库产品类型后动态根据资源中的数据表定义生成符合当前数据库方言的建表语句.后运行初始化表;</li>
-<li>从网上公开的知识可以了解到,金仓的数据库KingBase是根据开源数据库PostgreSQL魔改而来,然后通过汇总得知,在KingBase对于pgSQL的差异中包括(但不限于) 命令名,系统表和视图,函数的语法等等.从后端程序员的使用角度出发,能与我们产生兼容性联系的基本都在系统表和视图这部分的差异弥补;</li>
-<li>通过对JDBC标准的了解.我们得知每一个实现了JDBC标准的Driver都需要返回客户端一个字符串以表明自己的数据库名称(类型).所以,如果我们在KingBase的数据库驱动中将产品类型从”KingBaseES”换为”postgresql”.理论上就能骗过工具;</li>
-</ol>
-<h2 id="编码逻辑"><a href="#编码逻辑" class="headerlink" title="编码逻辑"></a>编码逻辑</h2><ol>
-<li>通过对现状的评估,得益于KingBase的魔改对于pgSQL的实现并不是破坏性的.我们觉得最小成本的修改应该是这样的,在关键节点中欺骗Activiti.让其始终认为自己连接的是pgSQL.而不是KingBase;</li>
-<li>KingBase数据库对于pgSQL还修改了所有的系统表和视图,但也仅是修改了前缀(比如pg_tables修改成sys_tables).而在一些开源框架中也会调用这些系统表来实现逻辑.基于此,我们觉得可以手动创建一批视图pg_tables去映射sys_tables;</li>
-</ol>
-<h2 id="实现方案"><a href="#实现方案" class="headerlink" title="实现方案"></a>实现方案</h2><ol>
-<li>反编译kingbase数据库连接驱动kingbase8-8.x.x.jar;找到实现了java.sql.DatabaseMetaData接口的类;</li>
-</ol>
-<figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="comment">// KingBase中实现了DatabaseMetaData的类在com.kingbase8.jdbc.KbDatabaseMetaData类中</span></span><br><span class="line"><span class="comment">// 找到如下的函数 将返回的 &quot;KingbaseES&quot; 修改为 &quot;postgresql&quot;</span></span><br><span class="line"> <span class="keyword">public</span> String <span class="title function_">getDatabaseProductName</span><span class="params">()</span> <span class="keyword">throws</span> SQLException &#123;</span><br><span class="line">     <span class="comment">// return &quot;KingbaseES&quot;;</span></span><br><span class="line">     <span class="keyword">return</span> <span class="string">&quot;postgresql&quot;</span>;</span><br><span class="line">  &#125;</span><br></pre></td></tr></table></figure>
-
-<ol start="2">
-<li>将修改过的KbDatabaseMetaData.class编译后重新打包入驱动中;</li>
-<li>手动到数据库创建视图 pg_tables(如有需要也可创建别的,这里仅作演示目的.);</li>
-</ol>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">create</span> <span class="keyword">view</span> pg_tables <span class="keyword">as</span> <span class="keyword">select</span> <span class="operator">*</span> <span class="keyword">from</span> sys_tables;</span><br></pre></td></tr></table></figure>
-
-<h2 id="其他方案"><a href="#其他方案" class="headerlink" title="其他方案"></a>其他方案</h2><ol>
-<li>依赖于java中的类加载器AppClassLoader中关于加载资源时定义的是个数组,且指向src目录的资源永远在下标零处.所以,只要在src中定义的类永远优先于其他地方的类加载;</li>
-<li>打开你需要集成的工具框架,找到用于解析数据库类型进行后续操作的类.在src下创建同名同路径的java文件;</li>
-<li>复制反编译后类中所有的代码至src目录下的文件后,增加对应的配置以在解析到”KingbaseES”进行自定义操作;</li>
-</ol>
-<h2 id="PS"><a href="#PS" class="headerlink" title="PS"></a>PS</h2><ol>
-<li>LiquiBase是一个方言无关的数据库版本管理工具,真心好用!!!会根据定义好的xml内容对数据库的初始化,数据表版本进行管理,Mekatok即是使用LiquiBase对数据库进行管理.再不需要在项目初次启动时先运行数据库建表脚本,也不需要再针对数据库加字段什么的汇总脚本各个环境先同步数据库.</li>
-</ol>
-]]></content>
-      <tags>
-        <tag>Mekatok</tag>
-        <tag>开发笔记</tag>
-      </tags>
-  </entry>
-  <entry>
     <title>JDK1.8的新特性及在项目中的一些应用</title>
     <url>/201904/aa891d5f79a5.html</url>
     <content><![CDATA[<h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a><em>前言</em></h2><ol>
@@ -132,72 +89,46 @@
       </tags>
   </entry>
   <entry>
-    <title>决不能碰的九种人生状态</title>
-    <url>/201809/d67a7846d098.html</url>
-    <content><![CDATA[<h2 id="犹豫不决"><a href="#犹豫不决" class="headerlink" title="犹豫不决"></a>犹豫不决</h2><blockquote>
-<p>比鲁莽更糟糕的是犹豫不决</p>
+    <title>关于金仓数据库不被主流框架(如Activiti,Flowable)支持的思考与解决方案</title>
+    <url>/202110/20007eeb8144.html</url>
+    <content><![CDATA[<h2 id="问题描述"><a href="#问题描述" class="headerlink" title="问题描述"></a>问题描述</h2><blockquote>
+<p>去年底的时候,我们的项目中需要使用工作流实现业务.经过一些讨论,最终决定使用开源引擎Activiti进行集成.在现阶段大环境下,项目要求需要使用自主可控的国产数据库–KingBase.</p>
 </blockquote>
-<p>像墙头草一样摇摆不定的人,无论其他方面多么强大.在生命的竞赛中总是容易被哪些坚定地人挤到一边.雷厉风行难免会犯错,但比什么也不敢做强.</p>
-<p>海特·黑德说: “<em><strong>畏惧错误就是毁灭进步</strong></em>“</p>
-<h2 id="拖延"><a href="#拖延" class="headerlink" title="拖延"></a>拖延</h2><blockquote>
-<p>计划很丰满,执行很骨感.</p>
+<blockquote>
+<p>用过Activiti,Flowable的同学应该都知道,这类工具是强依赖数据库的.特别是在项目启动的过程中就会创建一批数据表用于存储BMPN模型,工作流实例和历史数据等.这就导致在项目代码启动连接数据库的时候,就会报错显示 “不支持KingBaseES的数据库”.</p>
 </blockquote>
-<p>很多时候拖延就是在逃避问题和懒惰. 把横在面前的困难放大,望而却步,抱着能拖一天是一天的心态各种借口逃避.</p>
-<p>罗曼·罗兰说: “<em><strong>懒惰是很奇怪的东西,他让你以为那是安逸,是休息,是福气;但实际上它说给你的是无聊,是倦怠,是消沉.</strong></em>“</p>
-<h2 id="三分钟热度"><a href="#三分钟热度" class="headerlink" title="三分钟热度"></a>三分钟热度</h2><blockquote>
-<p>世界上有80%的失败都源于半途而废.</p>
-</blockquote>
-<p>“三分钟热度”的人不过是从来没有体验到坚持做一件事成功后带来的喜悦,因为坚持的过程总是枯燥又充满挫折的,人的天性又是好逸恶劳.</p>
-<h2 id="害怕拒绝"><a href="#害怕拒绝" class="headerlink" title="害怕拒绝"></a>害怕拒绝</h2><blockquote>
-<p>厚重而脆弱的自尊.</p>
-</blockquote>
-<p>大多数时候,我们在人际关系中感受到的”痛”,都和”感到被拒绝”有关.</p>
-<p>有时候这种拒绝是很明显的,比如爱人突然的离去或者被朋友背叛和疏远.</p>
-<p>而有时这种拒绝也可以是很细微的,比如你给了对方一个微笑的眼神,对方却移开了目光;或者你鼓起勇气给对方发了一个微信,对方却过很久才简短回复.</p>
-<p>一个能放下自尊去做事情的人,是遵从目标成果导向的人;而把自尊心放在第一位的人,在人际交往做事情的时候,总关注在他人对自己的态度.</p>
-<p>所以,一个人越是百无一用的时候,越质量于那些无足轻重的底线与小自尊心.</p>
-<h2 id="自我设限"><a href="#自我设限" class="headerlink" title="自我设限"></a>自我设限</h2><blockquote>
-<p>杀死自己的潜能力.</p>
-</blockquote>
-<p>他们经常这样说:我想做A,但是我怕做不到,因为B,C,D,E等等原因.</p>
-<p>他们还没去做之前,就先否定自己,并给自己找一堆不付出努力的理由.</p>
-<p>在自己的心里默认一个”高度”,这个”心理高度”尝尝暗示自己.这件事情我肯定没办法做好,就做到差不多就可以了.</p>
-<p>这种心理暗示可以帮我阻挡任务失败带来的挫败感,暂时维护我的自我价值感.但是,却也剥夺了我”往上再走一步”的成功机会.</p>
-<p>拉罗什富科说: “<em><strong>平庸的人总是在抱怨自己不懂的东西.</strong></em>“</p>
-<h2 id="逃避现实"><a href="#逃避现实" class="headerlink" title="逃避现实"></a>逃避现实</h2><blockquote>
-<p>白日梦患者.</p>
-</blockquote>
-<ul>
-<li>经常做白日梦—-逃避现实更愿意营造一个属于自己的小世界.</li>
-<li>喜欢随心所欲,无拘无束的生活—-说白了就是向往游手好闲的生活.</li>
-<li>沉迷游戏或是魔幻小说—-他们可以引领你走进那个神奇浩繁的世界,让你逃避日常现实生活.</li>
-<li>觉得现实世界很残酷—-这是逃避现实者的常见特征,在追寻白日梦的时候往往会遭受来自现实生活的打击.</li>
-<li>无法面对不确定环境—-因为在你营造的白日梦里,你才能找到安全感.</li>
-</ul>
-<p>人的悲剧在于眼高手低.大多数人激动时佛挡杀佛,幻想中睥睨天下.日常生活中却没法鼓起勇气和每个周末早上都要拿电钻钻墙的邻居好好谈一谈.</p>
-<h2 id="总找借口"><a href="#总找借口" class="headerlink" title="总找借口"></a>总找借口</h2><blockquote>
-<p>错不在我.</p>
-</blockquote>
-<p>人一旦犯了错,第一反应常常是自我辩护.</p>
-<p>喜欢找借口的人,他们都有一个共同的特点:没有强烈的事业心,没有执着的追求,人生没有一个坚定的信念.</p>
-<p>所以,遇到压力,遇到困难,他们就不承担,也不想承担;遇到风险,遇到挑战,就退缩.</p>
-<p>不承担,要退缩,就迫使他们找借口.因为找借口是最容易办到的事情,这是掩饰自己无知的方法,然后从中寻找自我安慰.</p>
-<h2 id="恐惧"><a href="#恐惧" class="headerlink" title="恐惧"></a>恐惧</h2><blockquote>
-<p>谨小慎微的懦弱.</p>
-</blockquote>
-<p>他们在工作中总会有这样的感受:害怕被领导批评,害怕别人觉得自己无能,害怕被别人知道自己的缺点,在意他人的评价,害怕犯错,害怕自己的付出得不到回报.</p>
-<p>我不敢下苦工琢磨自己,怕终于知道自己并非珠玉;然而心中有存着一丝希翼,便又不甘心与瓦砾为伍.其实就是心智的弱小,不愿意面对挫折感.</p>
-<p>王朔曾经跟他女儿说: “<em><strong>煲汤比写诗重要,自己的手艺比男人重要,头发和胸和腰和屁股比脸蛋重要,内心强大到混蛋比什么都重要.</strong></em>“</p>
-<h2 id="拒绝学习"><a href="#拒绝学习" class="headerlink" title="拒绝学习"></a>拒绝学习</h2><blockquote>
-<p>不是寂寞,只是不想学习.</p>
-</blockquote>
-<p>学习需要费脑子,自我成长需要不断和自己做斗争,多痛苦啊!</p>
-<p>还不如舒舒服服躺在家玩手机看电影,然后等看到同龄人薪资比你高,生活过的比你好时,你又在朋友圈感叹时运不济.</p>
-<p>我从未见过,每天从早忙到晚,拖着疲倦的身子回家的人感叹过 空虚寂寞冷.</p>
-<p>大多数人的空虚寂寞冷,基本上都是吃饱了没事干闲的.</p>
+<h2 id="问题思考"><a href="#问题思考" class="headerlink" title="问题思考"></a>问题思考</h2><ol>
+<li>通过查看Flowable的文档和源码,我们了解到这类工具在启动时会利用工具 LiquiBase 对数据库的数据表进行初始化(LiquiBase是一个方言无关的数据库版本管理工具).而LiquiBase在运行时会获取数据库产品类型后动态根据资源中的数据表定义生成符合当前数据库方言的建表语句.后运行初始化表;</li>
+<li>从网上公开的知识可以了解到,金仓的数据库KingBase是根据开源数据库PostgreSQL魔改而来,然后通过汇总得知,在KingBase对于pgSQL的差异中包括(但不限于) 命令名,系统表和视图,函数的语法等等.从后端程序员的使用角度出发,能与我们产生兼容性联系的基本都在系统表和视图这部分的差异弥补;</li>
+<li>通过对JDBC标准的了解.我们得知每一个实现了JDBC标准的Driver都需要返回客户端一个字符串以表明自己的数据库名称(类型).所以,如果我们在KingBase的数据库驱动中将产品类型从”KingBaseES”换为”postgresql”.理论上就能骗过工具;</li>
+</ol>
+<h2 id="编码逻辑"><a href="#编码逻辑" class="headerlink" title="编码逻辑"></a>编码逻辑</h2><ol>
+<li>通过对现状的评估,得益于KingBase的魔改对于pgSQL的实现并不是破坏性的.我们觉得最小成本的修改应该是这样的,在关键节点中欺骗Activiti.让其始终认为自己连接的是pgSQL.而不是KingBase;</li>
+<li>KingBase数据库对于pgSQL还修改了所有的系统表和视图,但也仅是修改了前缀(比如pg_tables修改成sys_tables).而在一些开源框架中也会调用这些系统表来实现逻辑.基于此,我们觉得可以手动创建一批视图pg_tables去映射sys_tables;</li>
+</ol>
+<h2 id="实现方案"><a href="#实现方案" class="headerlink" title="实现方案"></a>实现方案</h2><ol>
+<li>反编译kingbase数据库连接驱动kingbase8-8.x.x.jar;找到实现了java.sql.DatabaseMetaData接口的类;</li>
+</ol>
+<figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="comment">// KingBase中实现了DatabaseMetaData的类在com.kingbase8.jdbc.KbDatabaseMetaData类中</span></span><br><span class="line"><span class="comment">// 找到如下的函数 将返回的 &quot;KingbaseES&quot; 修改为 &quot;postgresql&quot;</span></span><br><span class="line"> <span class="keyword">public</span> String <span class="title function_">getDatabaseProductName</span><span class="params">()</span> <span class="keyword">throws</span> SQLException &#123;</span><br><span class="line">     <span class="comment">// return &quot;KingbaseES&quot;;</span></span><br><span class="line">     <span class="keyword">return</span> <span class="string">&quot;postgresql&quot;</span>;</span><br><span class="line">  &#125;</span><br></pre></td></tr></table></figure>
+
+<ol start="2">
+<li>将修改过的KbDatabaseMetaData.class编译后重新打包入驱动中;</li>
+<li>手动到数据库创建视图 pg_tables(如有需要也可创建别的,这里仅作演示目的.);</li>
+</ol>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">create</span> <span class="keyword">view</span> pg_tables <span class="keyword">as</span> <span class="keyword">select</span> <span class="operator">*</span> <span class="keyword">from</span> sys_tables;</span><br></pre></td></tr></table></figure>
+
+<h2 id="其他方案"><a href="#其他方案" class="headerlink" title="其他方案"></a>其他方案</h2><ol>
+<li>依赖于java中的类加载器AppClassLoader中关于加载资源时定义的是个数组,且指向src目录的资源永远在下标零处.所以,只要在src中定义的类永远优先于其他地方的类加载;</li>
+<li>打开你需要集成的工具框架,找到用于解析数据库类型进行后续操作的类.在src下创建同名同路径的java文件;</li>
+<li>复制反编译后类中所有的代码至src目录下的文件后,增加对应的配置以在解析到”KingbaseES”进行自定义操作;</li>
+</ol>
+<h2 id="PS"><a href="#PS" class="headerlink" title="PS"></a>PS</h2><ol>
+<li>LiquiBase是一个方言无关的数据库版本管理工具,真心好用!!!会根据定义好的xml内容对数据库的初始化,数据表版本进行管理,Mekatok即是使用LiquiBase对数据库进行管理.再不需要在项目初次启动时先运行数据库建表脚本,也不需要再针对数据库加字段什么的汇总脚本各个环境先同步数据库.</li>
+</ol>
 ]]></content>
       <tags>
-        <tag>生活态度</tag>
+        <tag>Mekatok</tag>
+        <tag>开发笔记</tag>
       </tags>
   </entry>
   <entry>
@@ -288,6 +219,75 @@
       <tags>
         <tag>Mekatok</tag>
         <tag>开发笔记</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>决不能碰的九种人生状态</title>
+    <url>/201809/d67a7846d098.html</url>
+    <content><![CDATA[<h2 id="犹豫不决"><a href="#犹豫不决" class="headerlink" title="犹豫不决"></a>犹豫不决</h2><blockquote>
+<p>比鲁莽更糟糕的是犹豫不决</p>
+</blockquote>
+<p>像墙头草一样摇摆不定的人,无论其他方面多么强大.在生命的竞赛中总是容易被哪些坚定地人挤到一边.雷厉风行难免会犯错,但比什么也不敢做强.</p>
+<p>海特·黑德说: “<em><strong>畏惧错误就是毁灭进步</strong></em>“</p>
+<h2 id="拖延"><a href="#拖延" class="headerlink" title="拖延"></a>拖延</h2><blockquote>
+<p>计划很丰满,执行很骨感.</p>
+</blockquote>
+<p>很多时候拖延就是在逃避问题和懒惰. 把横在面前的困难放大,望而却步,抱着能拖一天是一天的心态各种借口逃避.</p>
+<p>罗曼·罗兰说: “<em><strong>懒惰是很奇怪的东西,他让你以为那是安逸,是休息,是福气;但实际上它说给你的是无聊,是倦怠,是消沉.</strong></em>“</p>
+<h2 id="三分钟热度"><a href="#三分钟热度" class="headerlink" title="三分钟热度"></a>三分钟热度</h2><blockquote>
+<p>世界上有80%的失败都源于半途而废.</p>
+</blockquote>
+<p>“三分钟热度”的人不过是从来没有体验到坚持做一件事成功后带来的喜悦,因为坚持的过程总是枯燥又充满挫折的,人的天性又是好逸恶劳.</p>
+<h2 id="害怕拒绝"><a href="#害怕拒绝" class="headerlink" title="害怕拒绝"></a>害怕拒绝</h2><blockquote>
+<p>厚重而脆弱的自尊.</p>
+</blockquote>
+<p>大多数时候,我们在人际关系中感受到的”痛”,都和”感到被拒绝”有关.</p>
+<p>有时候这种拒绝是很明显的,比如爱人突然的离去或者被朋友背叛和疏远.</p>
+<p>而有时这种拒绝也可以是很细微的,比如你给了对方一个微笑的眼神,对方却移开了目光;或者你鼓起勇气给对方发了一个微信,对方却过很久才简短回复.</p>
+<p>一个能放下自尊去做事情的人,是遵从目标成果导向的人;而把自尊心放在第一位的人,在人际交往做事情的时候,总关注在他人对自己的态度.</p>
+<p>所以,一个人越是百无一用的时候,越质量于那些无足轻重的底线与小自尊心.</p>
+<h2 id="自我设限"><a href="#自我设限" class="headerlink" title="自我设限"></a>自我设限</h2><blockquote>
+<p>杀死自己的潜能力.</p>
+</blockquote>
+<p>他们经常这样说:我想做A,但是我怕做不到,因为B,C,D,E等等原因.</p>
+<p>他们还没去做之前,就先否定自己,并给自己找一堆不付出努力的理由.</p>
+<p>在自己的心里默认一个”高度”,这个”心理高度”尝尝暗示自己.这件事情我肯定没办法做好,就做到差不多就可以了.</p>
+<p>这种心理暗示可以帮我阻挡任务失败带来的挫败感,暂时维护我的自我价值感.但是,却也剥夺了我”往上再走一步”的成功机会.</p>
+<p>拉罗什富科说: “<em><strong>平庸的人总是在抱怨自己不懂的东西.</strong></em>“</p>
+<h2 id="逃避现实"><a href="#逃避现实" class="headerlink" title="逃避现实"></a>逃避现实</h2><blockquote>
+<p>白日梦患者.</p>
+</blockquote>
+<ul>
+<li>经常做白日梦—-逃避现实更愿意营造一个属于自己的小世界.</li>
+<li>喜欢随心所欲,无拘无束的生活—-说白了就是向往游手好闲的生活.</li>
+<li>沉迷游戏或是魔幻小说—-他们可以引领你走进那个神奇浩繁的世界,让你逃避日常现实生活.</li>
+<li>觉得现实世界很残酷—-这是逃避现实者的常见特征,在追寻白日梦的时候往往会遭受来自现实生活的打击.</li>
+<li>无法面对不确定环境—-因为在你营造的白日梦里,你才能找到安全感.</li>
+</ul>
+<p>人的悲剧在于眼高手低.大多数人激动时佛挡杀佛,幻想中睥睨天下.日常生活中却没法鼓起勇气和每个周末早上都要拿电钻钻墙的邻居好好谈一谈.</p>
+<h2 id="总找借口"><a href="#总找借口" class="headerlink" title="总找借口"></a>总找借口</h2><blockquote>
+<p>错不在我.</p>
+</blockquote>
+<p>人一旦犯了错,第一反应常常是自我辩护.</p>
+<p>喜欢找借口的人,他们都有一个共同的特点:没有强烈的事业心,没有执着的追求,人生没有一个坚定的信念.</p>
+<p>所以,遇到压力,遇到困难,他们就不承担,也不想承担;遇到风险,遇到挑战,就退缩.</p>
+<p>不承担,要退缩,就迫使他们找借口.因为找借口是最容易办到的事情,这是掩饰自己无知的方法,然后从中寻找自我安慰.</p>
+<h2 id="恐惧"><a href="#恐惧" class="headerlink" title="恐惧"></a>恐惧</h2><blockquote>
+<p>谨小慎微的懦弱.</p>
+</blockquote>
+<p>他们在工作中总会有这样的感受:害怕被领导批评,害怕别人觉得自己无能,害怕被别人知道自己的缺点,在意他人的评价,害怕犯错,害怕自己的付出得不到回报.</p>
+<p>我不敢下苦工琢磨自己,怕终于知道自己并非珠玉;然而心中有存着一丝希翼,便又不甘心与瓦砾为伍.其实就是心智的弱小,不愿意面对挫折感.</p>
+<p>王朔曾经跟他女儿说: “<em><strong>煲汤比写诗重要,自己的手艺比男人重要,头发和胸和腰和屁股比脸蛋重要,内心强大到混蛋比什么都重要.</strong></em>“</p>
+<h2 id="拒绝学习"><a href="#拒绝学习" class="headerlink" title="拒绝学习"></a>拒绝学习</h2><blockquote>
+<p>不是寂寞,只是不想学习.</p>
+</blockquote>
+<p>学习需要费脑子,自我成长需要不断和自己做斗争,多痛苦啊!</p>
+<p>还不如舒舒服服躺在家玩手机看电影,然后等看到同龄人薪资比你高,生活过的比你好时,你又在朋友圈感叹时运不济.</p>
+<p>我从未见过,每天从早忙到晚,拖着疲倦的身子回家的人感叹过 空虚寂寞冷.</p>
+<p>大多数人的空虚寂寞冷,基本上都是吃饱了没事干闲的.</p>
+]]></content>
+      <tags>
+        <tag>生活态度</tag>
       </tags>
   </entry>
 </search>
