@@ -1,5 +1,4 @@
-
-name: 部署文档
+name: 部署网站
 
 on:
     push:
@@ -8,7 +7,7 @@ on:
             - main
 
 jobs:
-    deploy-gh-pages:
+    deploy-website:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout

@@ -13,4 +13,4 @@ pnpm run docs:build
 ```
 ## 自动部署
 * 通过 Github Action 自动部署至Github Page
-* 配置信息定义在 *.github/workflows/deploy-docs.yml* 文件;
+* 配置信息定义在 [website-deploy-github-pages.yml](/.github/workflows/website-deploy-github-pages.yml) 文件;
