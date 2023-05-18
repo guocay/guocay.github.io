@@ -3,16 +3,16 @@ import {searchProPlugin} from "vuepress-plugin-search-pro";
 import theme from "./theme.js";
 
 export default defineUserConfig({
-	base: "/",
-
-	// 输出目录
-	// dest: "dist",
+	// 演示服务端口号
+	port: 8080,
 
 	// 基础信息
+	base: "/",
 	lang: "zh-CN",
 	title: "GuoCay",
 	description: "guocay's personal blog.",
 
+	// 插件配置
 	plugins: [
 		searchProPlugin({
 			// 索引全部内容
