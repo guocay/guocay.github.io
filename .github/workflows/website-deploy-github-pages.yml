@@ -1,4 +1,5 @@
-name: 部署网站
+name: build static file
+run-name: build resource to website branch
 
 on:
     push:
