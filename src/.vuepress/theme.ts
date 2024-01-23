@@ -23,11 +23,10 @@ export default hopeTheme({
 	blog: {
 		timeline: "不积跬步,无以至千里...",
 		medias: {
-			GitHub: "https://github.com/guocay",
+			Github: "https://github.com/guocay",
 			Gitee: "https://gitee.com/guocay",
-			Zhihu: "https://www.zhihu.com/people/CoderGk",
+			Zhihu: "https://zhihu.com/people/guocay",
 			Twitter: "https://twitter.com/guocay",
-			Weibo: "https://weibo.com/guocay",
 			Gmail: "mailto:guocay@gmail.com"
 		},
 	},
