@@ -3,7 +3,7 @@ import {zhNavbar} from "./navbar";
 import {zhSidebar} from "./sidebar";
 
 export default hopeTheme({
-	hostname: "https://guocay.github.io",
+	hostname: "https://guocay.fun",
 
 	author: {
 		name: "GuoCay",
