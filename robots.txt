@@ -2,4 +2,4 @@
 User-agent:*
 Disallow:
 
-Sitemap: https://guocay.github.io/sitemap.xml
+Sitemap: https://guocay.fun/sitemap.xml
