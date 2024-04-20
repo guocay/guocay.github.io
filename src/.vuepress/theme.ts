@@ -3,14 +3,14 @@ import {zhNavbar} from "./navbar";
 import {zhSidebar} from "./sidebar";
 
 export default hopeTheme({
-	hostname: "https://guocay.fun",
+	hostname: "https://blog.guocay.com",
 
 	author: {
 		name: "GuoCay",
 		email: "guocay@gmail.com",
 	},
 
-	iconAssets: "iconfont",
+	iconAssets: "iconify",
 
 	logo: "/favicon.ico",
 
@@ -31,13 +31,8 @@ export default hopeTheme({
 		},
 	},
 
-	// 主题色
-	themeColor: {
-		blue: "#2196f3",
-		red: "#f26d6d",
-		green: "#3eaf7c",
-		orange: "#fb9b5f",
-	},
+	// 是否开启选择主题色
+	themeColor: true,
 
 	// 全屏按钮
 	fullscreen: true,
@@ -91,32 +86,57 @@ export default hopeTheme({
 			excerpt: true,
 		},
 
+		// 评论系统
 		comment: {
 			// provider: "Giscus",
 		},
 
-		// all features are enabled for demo, only preserve features you need here
+		// 搜索相关的配置
+		searchPro: {
+			// 索引全部内容
+			indexContent: true,
+			autoSuggestions: true,
+
+			// 禁用快捷按键
+			hotKeys: [],
+
+			// 语言选择
+			locales: {
+				"/": {
+					// 设置搜索框文本为空
+					// search: ''
+				}
+			},
+
+			// 为分类和标签添加索引
+			customFields: [
+				{
+					// @ts-ignore
+					getter: (page) => page.frontmatter.category,
+					formatter: "分类：$content",
+				},
+				{
+					// @ts-ignore
+					getter: (page) => page.frontmatter.tag,
+					formatter: "标签：$content",
+				},
+			],
+		},
+
+		// MD文件增强配置
 		mdEnhance: {
 			align: true,
 			attrs: true,
-			chart: true,
 			codetabs: true,
 			demo: true,
-			echarts: true,
 			figure: true,
-			flowchart: true,
 			gfm: true,
 			imgLazyload: true,
 			imgSize: true,
 			include: true,
-			katex: true,
 			mark: true,
-			mermaid: true,
 			playground: {
 				presets: ["ts", "vue"],
-			},
-			presentation: {
-				plugins: ["highlight", "math", "search", "notes", "zoom"],
 			},
 			stylize: [
 				{
@@ -134,8 +154,24 @@ export default hopeTheme({
 			sub: true,
 			sup: true,
 			tabs: true,
-			vPre: true,
-			vuePlayground: true,
+			vPre: true
 		},
-	},
+
+		// SEO增强配置
+		seo: {
+
+		},
+
+		// 阅读时间及字数配置
+		readingTime: {
+
+		},
+
+		// 检测无效链接
+		linksCheck: {
+
+		},
+
+
+	}
 });

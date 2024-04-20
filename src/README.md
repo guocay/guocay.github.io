@@ -2,6 +2,7 @@
 home: true
 layout: BlogHome
 icon: home
+title: 自定义博客主页
 heroText: Guo Cay
 heroFullScreen: true
 tagline: 这世上只有一种英雄主义，那就是认清生活的本质后依旧热爱着它。

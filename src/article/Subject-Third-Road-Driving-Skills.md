@@ -81,7 +81,7 @@ category: "驾照考试"
 
 :::
 
-> [科目三-灯光模拟练习小程序(Java版)](https://guocay.github.io/article/Subject-Third-Light-Simulation-Practise.html)
+> [科目三-灯光模拟练习小程序(Java版)](/article/Subject-Third-Light-Simulation-Practise.html)
 
 1. 等待监考系统播放语音: "*下面将进行模拟夜间灯光使用的考试，请跟距语音播报情形，在语音播报结束后5秒内完成相应的灯光操作*". 开始灯光模拟考试;
 2. 考试共五道题, 第一题恒等于 *请开启前照灯*;

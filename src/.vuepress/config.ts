@@ -1,8 +1,14 @@
 import {defineUserConfig} from "vuepress";
-import {searchProPlugin} from "vuepress-plugin-search-pro";
-import theme from "./theme.js";
+import theme from "./theme";
+import viteBundler from "@vuepress/bundler-vite";
+import {baiduAnalyticsPlugin} from "@vuepress/plugin-baidu-analytics";
 
 export default defineUserConfig({
+	bundler: viteBundler({
+		vuePluginOptions: {},
+		viteOptions: {}
+	}),
+
 	// 演示服务端口号
 	port: 8080,
 
@@ -12,38 +18,18 @@ export default defineUserConfig({
 	title: "GuoCay",
 	description: "guocay's personal blog.",
 
-	// 插件配置
+	// 允许自定义模块实现
+	// See https://theme-hope.vuejs.press/zh/guide/advanced/replace.html
+	alias: {
+
+	},
+
 	plugins: [
-		searchProPlugin({
-			// 索引全部内容
-			indexContent: true,
-
-			// 禁用快捷按键
-			hotKeys: [],
-
-			locales: {
-				"/": {
-					// 设置搜索框文本为空
-					search: ''
-				}
-			},
-
-			// 为分类和标签添加索引
-			customFields: [
-				{
-					// @ts-ignore
-					getter: (page) => page.frontmatter.category,
-					formatter: "分类：$content",
-				},
-				{
-					// @ts-ignore
-					getter: (page) => page.frontmatter.tag,
-					formatter: "标签：$content",
-				},
-			],
-
-		}),
+		// 百度网站数据统计
+		baiduAnalyticsPlugin({
+			id: "f844401f817ffaf261c27948e9d085bc"
+		})
 	],
-
+	// 主题配置
 	theme
 });
